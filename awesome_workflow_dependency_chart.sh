@@ -1,31 +1,5 @@
 #! /bin/bash
 
-# Laurence Hubbard, 13th May 2016
-
-# Old dev update (24th May 2016):
-# The properties file doesn't have StagingME variable in it - there is an issue with it capturing variables that needs to be looked into
-	# This was just a test mode variable limiting the number of properties per file being processed (changed to property test mode variable)
-# Next dev stage is to find a replace the key/value pairs listed in the properties file to make the XML be 100% hard-coded
-	# After replacing backslashes to escape required characters for sed to work, this is now completed
-
-# Old dev update (25th May 2016):
-# There is an issue when attempting to populate the "all sql" file. The HDFS text fails occasionally and the sql file disappears before the sql_to_dot function can cat it!!!
-	# This looks to be fixed (didn't change much - results look to be inconsistent so may need to be looked into again - use ROLLING_TOTAL variable to compare row counts)
-
-# Latest dev update (26th May 2016):
-# Need to slim down the produce_dependency_map.sh.v03_slimming script and put the code into the sql_to_dot function here 
-
-
-# Future dev plans:
-# Split the XML into workflow types, print an error for unknown types (all of them to start with)
-# Integrate the Hive processing into dependencies, but this time it needs to be the HDFS directory as the key and the Hive table name can be an alias to the key
-# Design filesystem commands to be processed into dependencies
-# Design pig scripts to be processed into dependencies based on directory locations
-# Finalise colour-coordination and directory/ subdirectory relationships
-# Produce massive PDF
-# Enable easy use for targetting specific coordinators / key words / databases?
-#
-
 # Variables to modify
 VERBOSE=false
 TEST_MODE=false
