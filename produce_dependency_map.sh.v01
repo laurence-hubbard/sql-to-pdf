@@ -1,0 +1,105 @@
+#! /bin/bash
+
+# Local Mac version of sed is old
+alias sed='gsed'
+
+SQL=/Users/LHubbard/Desktop/projects/graphviz/SQL
+DOT=/Users/LHubbard/Desktop/projects/graphviz/DOT
+TEMP=/tmp/LHubbard/projects/graphviz
+mkdir -p $TEMP
+NODE_COUNT=1
+CURRENT_DATABASE=DEFAULT
+
+sql_targets () {
+INPUT_FILE=$1
+
+#cat $INPUT_FILE | grep -i create\ table | grep -io " [^ ]*\.[^ ]* " | sed 's/^ //g' | sed 's/ $//g' | grep -v ^$ | tr '[:lower:]' '[:upper:]' > $OUTPUT_FILE
+cat $INPUT_FILE  | egrep -io "create table [^ ]* as|INSERT INTO TABLE [^ ]*" | sed 's/create table //ig' | sed 's/ as//ig' | sed 's/INSERT INTO TABLE //ig' | grep -v ^$ | tr '[:lower:]' '[:upper:]'
+cat $INPUT_FILE | egrep -io "ALTER TABLE [^ ]* RENAME TO [^ ]*" | grep -io "RENAME TO [^ ]*" | sed 's/RENAME TO //ig' | grep -v ^$ | tr '[:lower:]' '[:upper:]'
+cat $INPUT_FILE  | egrep -io "create external table [^ ]* as" | sed 's/create external table //ig' | sed 's/ as//ig' | grep -v ^$ | tr '[:lower:]' '[:upper:]'
+
+cat $INPUT_FILE  | egrep -io "create table if not exists [^ ]* as" | sed 's/create table if not exists //ig' | sed 's/ as//ig' | grep -v ^$ | tr '[:lower:]' '[:upper:]'
+cat $INPUT_FILE  | egrep -io "create external table if not exists [^ ]* as" | sed 's/create external table if not exists //ig' | sed 's/ as//ig' | grep -v ^$ | tr '[:lower:]' '[:upper:]'
+
+
+}
+
+sql_sources () {
+INPUT_FILE=$1
+
+cat $INPUT_FILE | egrep -io " from [^ ()]*|join [^ ()]*" | sed 's/ from //ig' | sed 's/join //ig' | grep -v ^$ | tr '[:lower:]' '[:upper:]'
+cat $INPUT_FILE | grep -io "ALTER TABLE [^ ]* RENAME TO" | sed 's/ALTER TABLE //ig' | sed 's/ rename to//ig' | grep -v ^$ | tr '[:lower:]' '[:upper:]'
+
+}
+
+extract_value_from_sql_file (){
+INPUT_FILE=$1
+
+#               remove comments                 file on 1 line          split SQL parts         remove drop             remove comments (again?)         remove use      remove blank & alter    remove tabs & squash multi-spaces
+cat $INPUT_FILE | sed 's/^[ ]*//g' | grep -v ^- | awk '{print}' ORS=' ' | sed 's/;/\n/g' | grep -iv ^set | grep -vi "drop table" | sed 's/^[ ]*//g' | grep -v ^- | grep -v ^$ | grep -iv ^alter | sed 's/\t/ /g' | tr -s ' ' | grep -iv ^set > $TEMP/extract_value_from_sql_file.tmp
+cat $INPUT_FILE | sed 's/^[ ]*//g' | grep -v ^- | awk '{print}' ORS=' ' | sed 's/;/\n/g' | egrep -io "ALTER TABLE [^ ]* RENAME TO [^ ]*" | sed 's/\t/ /g' | tr -s ' ' >> $TEMP/extract_value_from_sql_file.tmp
+
+echo $TEMP/extract_value_from_sql_file.tmp
+
+echo "digraph d {" > $DOT/out.dot
+
+while read LINE; do
+	[ $(echo $LINE | grep -i ^use | wc -l) -ne 0 ] && CURRENT_DATABASE=$(echo $LINE | grep -io "use [^ ]*" | sed 's/use //ig' | tr '[:lower:]' '[:upper:]')  && continue
+	echo $LINE > $TEMP/tmp
+	echo $LINE
+	sql_sources $TEMP/tmp > $TEMP/sources
+	sql_targets $TEMP/tmp > $TEMP/targets
+	echo sources
+	cat $TEMP/sources
+	echo targets
+	cat $TEMP/targets
+	SOURCES=""
+	while read SOURCE; do
+#		SOURCES="$SOURCES $NODE_COUNT"
+		SOURCE=$(echo $SOURCE | sed 's/\./__/g')
+		[ $(echo $SOURCE | grep -o "__" | wc -l) -eq 0 ] && SOURCE="$CURRENT_DATABASE"__"$SOURCE"
+		SOURCES="$SOURCES $SOURCE"
+	#	echo "$NODE_COUNT [label =\"$SOURCE\"]" >> $DOT/out.dot
+		NODE_COUNT=$((NODE_COUNT+1))
+	done < $TEMP/sources
+	TARGETS=""
+	while read TARGET; do
+	#	TARGETS="$TARGETS $NODE_COUNT"
+		TARGET=$(echo $TARGET | sed 's/\./__/g')
+		[ $(echo $TARGET | grep -o "__" | wc -l) -eq 0 ] && TARGET="$CURRENT_DATABASE"__"$TARGET" 
+		TARGETS="$TARGETS $TARGET"
+	#	echo "$NODE_COUNT [label =\"$TARGET\"]" >> $DOT/out.dot
+                NODE_COUNT=$((NODE_COUNT+1))
+	done < $TEMP/targets
+#	echo $SOURCES
+#	echo $TARGETS
+	echo "{ $SOURCES } -> { $TARGETS }" >> $DOT/out.dot
+done < $TEMP/extract_value_from_sql_file.tmp
+
+echo "}" >> $DOT/out.dot
+cat $DOT/out.dot
+dot -T png -O $DOT/out.dot -o $DOT/out.png 
+
+}
+
+#extract_value_from_sql_file /Users/LHubbard/Desktop/projects/meerkat_movies/RewardsMembership.sql zero.lines
+
+cat $SQL/* > $TEMP/all_sql
+extract_value_from_sql_file y.q
+#extract_value_from_sql_file $TEMP/all_sql
+#extract_value_from_sql_file one.q
+
+exit 0
+
+#extract_value_from_sql_file /Users/LHubbard/Desktop/projects/meerkat_movies/RewardsMembership.sql
+
+extract_value_from_sql_file one.q
+exit 0
+
+
+
+sql_sources one.q
+
+echo
+
+sql_targets one.q
