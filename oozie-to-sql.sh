@@ -21,6 +21,8 @@ log(){
   echo \$(date +%F\ %T) - oozie-to-sql - \$1
 }
 
+$TEST && log "Test mode enabled and test volume is $TEST_VOLUME"
+
 log "Starting!!!!"
 
 log "Getting unique list of workflow names"
@@ -37,6 +39,7 @@ done < $PROXY_LANDING/workflow_names.txt
 
 log "Getting set of workflow defintions, including sub-workflow definitions"
 
+rm -f $PROXY_LANDING/hive_ql_full_list.txt
 while read WORKFLOW_ID; do
     log "Getting workflow defintion for \$WORKFLOW_ID"
     oozie job -oozie http://172.29.0.243:11000/oozie/ -definition \$WORKFLOW_ID > $PROXY_LANDING/workflow_definition.temp
@@ -48,17 +51,34 @@ while read WORKFLOW_ID; do
         while read SUB_WORKFLOW_HDFS_PATH; do
             log "Adding sub-workflow XML \$SUB_WORKFLOW_HDFS_PATH to definition of \$WORKFLOW_ID"
 
-#  CAN'T GET THIS BIT TO WORK!!!
+sudo su hdfs <<TEXT >> $PROXY_LANDING/workflow_definition.temp
+                hadoop fs -text \$SUB_WORKFLOW_HDFS_PATH
+TEXT
 
-            sudo su hdfs "hadoop fs -text $SUB_WORKFLOW_HDFS_PATH" | awk '{print}' ORS=' ' | grep -o "<app-path>[^<>]*</app-path>" | sed 's/<[^<>]*>//g' | sed 's/^\${[^{}]*}//g' | sed 's|$|/workflow.xml|g' >> $PROXY_LANDING/workflow_definition.temp 
-            sudo su hdfs chmod 777 $PROXY_LANDING/workflow_definition.temp
         done < $PROXY_LANDING/sub_workflows_list.temp
     else
         log "No sub-workflows found"
     fi
-
+    
+    log "Extracting HiveQL paths from workflow definition"
+    cat $PROXY_LANDING/workflow_definition.temp | awk '{print}' ORS=' ' | grep -o "<script>[^<>]*</script>" | sed 's/<[^<>]*>//g' | egrep -i "\.q$" >> $PROXY_LANDING/hive_ql_full_list.txt
 done < $PROXY_LANDING/workflow_ids.txt
+
+cat $PROXY_LANDING/hive_ql_full_list.txt | sort | uniq > $PROXY_LANDING/hive_ql_uniq_list.txt
+log "Number of unique HiveQL files is \$(cat $PROXY_LANDING/hive_ql_uniq_list.txt | wc -l)"
+
+log "Extracting SQL from files found"
+rm -f $PROXY_LANDING/bretton-cluster.sql
+while read HIVE_QL; do
+log "Reading SQL from \$HIVE_QL"
+sudo su hdfs <<TEXT >> $PROXY_LANDING/bretton-cluster.sql
+hadoop fs -text \$HIVE_QL
+TEXT
+done < $PROXY_LANDING/hive_ql_uniq_list.txt
+
+log "Now downloading SQL file"
 
 RUN
 
-
+rm -f ./target/sql/bretton-cluster.sql
+scp -i $PROXY_KEY $PROXY_HOST:$PROXY_LANDING/bretton-cluster.sql ./target/sql/bretton-cluster.sql
