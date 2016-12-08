@@ -12,7 +12,7 @@ PROXY_LANDING=/home/likewise-open/INSURANCE/l_hubbard/LANDING
 # Hard Configs
 PROXY_SQL_OUT=$PROXY_LANDING/OOZIE_WORKFLOWS.sql
 OOZIE_JOBS_HISTORY=1000
-TEST=true
+TEST=false
 TEST_VOLUME=1
 
 $PROXY_SSH <<RUN
@@ -37,7 +37,7 @@ while read WORKFLOW_NAME; do
     oozie jobs -oozie http://172.29.0.243:11000/oozie/ -len $OOZIE_JOBS_HISTORY | grep "\$WORKFLOW_NAME"SUCCEEDED | head -1 | awk '{print \$1}' >> $PROXY_LANDING/workflow_ids.txt
 done < $PROXY_LANDING/workflow_names.txt
 
-log "Getting set of workflow defintions, including sub-workflow definitions"
+log "Getting set of workflow definitions, including sub-workflow definitions"
 
 rm -f $PROXY_LANDING/hive_ql_full_list.txt
 while read WORKFLOW_ID; do
@@ -80,5 +80,6 @@ log "Now downloading SQL file"
 
 RUN
 
+mkdir -p ./target/sql/
 rm -f ./target/sql/bretton-cluster.sql
 scp -i $PROXY_KEY $PROXY_HOST:$PROXY_LANDING/bretton-cluster.sql ./target/sql/bretton-cluster.sql
