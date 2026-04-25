@@ -1,6 +1,6 @@
 #! /bin/bash
 
-# Take a SQL file and turn it into a relationship diagram in PDF form
+# Take a SQL file and turn it into a relationship diagram in PDF or Mermaid form
 
 ##
 ## Configurable
@@ -13,7 +13,10 @@ COLOURS="lightcyan,brown1,peru,yellowgreen,orangered2,whitesmoke,salmon,sandybro
 DEFAULT_NAME=true
 OVERRIDE_NAME="override-example"
 
-# Hard Configs 
+# Supported output formats: pdf, dot, mermaid
+OUTPUT_FORMAT=${OUTPUT_FORMAT:-pdf}
+
+# Hard Configs
 alias sed='gsed'
 TEMP=/tmp/$(basename $0)
 mkdir -p $TEMP
@@ -21,28 +24,42 @@ log(){
   echo $(date +%F\ %T) - sql-to-pdf - $1
 }
 
-if [ $# -eq 1 ]; then
+if [ $# -ge 1 ]; then
 	INPUT_SQL=$1
 else
 	log "Test mode enabled (otherwise provide SQL file as an argument)"
 	INPUT_SQL=./target/sql/example.sql
 fi
 
+if [ $# -ge 2 ]; then
+	OUTPUT_FORMAT=$2
+fi
+
+case "$OUTPUT_FORMAT" in
+	pdf|dot|mermaid) ;;
+	*)
+		log "Unsupported output format: $OUTPUT_FORMAT. Use pdf, dot, or mermaid."
+		exit 1
+		;;
+esac
+
 $DEFAULT_NAME && FILENAME=$(basename $INPUT_SQL | cut -d'.' -f1) || FILENAME=$OVERRIDE_NAME
 
-log "Starting - converting $INPUT_SQL to ./target/pdf/$FILENAME.pdf!"
+log "Starting - converting $INPUT_SQL to $OUTPUT_FORMAT output!"
 
 SQL=./target/sql
 DOT=./target/dot
 PDF=./target/pdf
+MERMAID=./target/mermaid
+mkdir -p $DOT $PDF $MERMAID
 
 NODE_COUNT=1
 CURRENT_DATABASE=DEFAULT
 USE_COLOURS=true
 
-OUTPUT_FORMAT=pdf
-OUTPUT_FILE=$PDF/$FILENAME.$OUTPUT_FORMAT
 DOT_FILE=$DOT/$FILENAME.dot
+PDF_FILE=$PDF/$FILENAME.pdf
+MERMAID_FILE=$MERMAID/$FILENAME.mmd
 
 # Colour picking mechanism
 X=1
@@ -70,6 +87,24 @@ db_colour (){
 	fi
 	echo $1,$(echo $COL | cut -d' ' -f1) >> $DB_FILE
 	COL=$(echo $COL | cut -d' ' -f1)
+}
+
+mermaid_id () {
+	echo "$1" | sed 's/[^A-Za-z0-9_]/_/g'
+}
+
+write_mermaid_node () {
+	NODE_LABEL=$1
+	NODE_ID=$(mermaid_id "$NODE_LABEL")
+	echo "    $NODE_ID[\"$NODE_LABEL\"]" >> $MERMAID_FILE
+}
+
+write_mermaid_edge () {
+	SOURCE_LABEL=$1
+	TARGET_LABEL=$2
+	SOURCE_ID=$(mermaid_id "$SOURCE_LABEL")
+	TARGET_ID=$(mermaid_id "$TARGET_LABEL")
+	echo "    $SOURCE_ID --> $TARGET_ID" >> $MERMAID_FILE
 }
 
 sql_targets () {
@@ -117,16 +152,12 @@ cat $INPUT_FILE | grep -io "ALTER TABLE [^ ]* RENAME TO" | sed 's/ALTER TABLE //
 extract_value_from_sql_file (){
 INPUT_FILE=$1
 
-#               remove comments                 file on 1 line          split SQL parts         remove drop             remove comments (again?)         remove use      remove blank & alter    remove tabs & squash multi-spaces
-cat $INPUT_FILE | sed 's/^[ ]*//g' | grep -v ^- | awk '{print}' ORS=' ' | sed 's/;/\n/g' | grep -iv ^set | grep -vi "drop table" | sed 's/^[ ]*//g' | grep -v ^- | grep -v ^$ | grep -iv ^alter | sed 's/\t/ /g' | tr -s ' ' | grep -iv ^set > $TEMP/extract_value_from_sql_file.tmp
-cat $INPUT_FILE | sed 's/^[ ]*//g' | grep -v ^- | awk '{print}' ORS=' ' | sed 's/;/\n/g' | egrep -io "ALTER TABLE [^ ]* RENAME TO [^ ]*" | sed 's/\t/ /g' | tr -s ' ' >> $TEMP/extract_value_from_sql_file.tmp
-
-# The alter table statements need to be INLINE, otherwise the databases used are out of order:
 cat $INPUT_FILE | sed 's/\t/ /g' | tr -s ' ' | sed 's/^[ ]*//g' | grep -v ^- | awk '{print}' ORS=' ' | sed 's/;/\n/g' | grep -iv ^set | grep -vi "drop table" | grep -v ^$ > $TEMP/extract_value_from_sql_file.tmp
 
 echo $TEMP/extract_value_from_sql_file.tmp
 
 echo "digraph d {" > $DOT_FILE
+echo "flowchart LR" > $MERMAID_FILE
 
 while read LINE; do
 	[ $(echo $LINE | grep -i ^use | wc -l) -ne 0 ] && CURRENT_DATABASE=$(echo $LINE | grep -io "use [^ ]*" | sed 's/use //ig' | tr '[:lower:]' '[:upper:]')  && continue
@@ -141,42 +172,55 @@ while read LINE; do
 	SOURCES=""
 	while read SOURCE; do
 		SOURCE=$(echo $SOURCE | sed 's/^[()]//g' | sed 's/[()]$//g')
-#		SOURCES="$SOURCES $NODE_COUNT"
-#		SOURCE=$(echo $SOURCE | sed 's/\./__/g')
 		[ $(echo $SOURCE | grep -o "\." | wc -l) -eq 0 ] && SOURCE="$CURRENT_DATABASE"."$SOURCE"
 		SOURCE="\"$SOURCE\""
 		SOURCES="$SOURCES $SOURCE"
-	#	echo "$NODE_COUNT [label =\"$SOURCE\"]" >> $DOT/out.dot
 		NODE_COUNT=$((NODE_COUNT+1))
 		SOURCE=$(echo $SOURCE | sed 's/"//g')
 		DATABASE=$(echo $SOURCE | cut -d'.' -f1)
 		db_colour $DATABASE
 		$USE_COLOURS && echo "\"$SOURCE\" [shape=box,style=filled,color="$COL"]" >> $DOT_FILE
+		write_mermaid_node "$SOURCE"
 	done < $TEMP/sources
 	TARGETS=""
 	while read TARGET; do
 		TARGET=$(echo $TARGET | sed 's/^[()]//g' | sed 's/[()]$//g')
-	#	TARGETS="$TARGETS $NODE_COUNT"
-#		TARGET=$(echo $TARGET | sed 's/\./__/g')
-		[ $(echo $TARGET | egrep -o "\.|/" | wc -l) -eq 0 ] && TARGET="$CURRENT_DATABASE"."$TARGET" 
+		[ $(echo $TARGET | egrep -o "\.|/" | wc -l) -eq 0 ] && TARGET="$CURRENT_DATABASE"."$TARGET"
 		TARGET="\"$TARGET\""
 		TARGETS="$TARGETS $TARGET"
-	#	echo "$NODE_COUNT [label =\"$TARGET\"]" >> $DOT/out.dot
                 NODE_COUNT=$((NODE_COUNT+1))
 		TARGET=$(echo $TARGET | sed 's/"//g')
 		DATABASE=$(echo $TARGET | cut -d'.' -f1)
 		db_colour $DATABASE
                 $USE_COLOURS && echo "\"$TARGET\" [shape=box,style=filled,color="$COL"]" >> $DOT_FILE
+		write_mermaid_node "$TARGET"
 	done < $TEMP/targets
-#	echo $SOURCES
-#	echo $TARGETS
 	echo "{ $SOURCES } -> { $TARGETS }" >> $DOT_FILE
+	while read SOURCE; do
+		SOURCE=$(echo $SOURCE | sed 's/^[()]//g' | sed 's/[()]$//g')
+		[ $(echo $SOURCE | grep -o "\." | wc -l) -eq 0 ] && SOURCE="$CURRENT_DATABASE"."$SOURCE"
+		while read TARGET; do
+			TARGET=$(echo $TARGET | sed 's/^[()]//g' | sed 's/[()]$//g')
+			[ $(echo $TARGET | egrep -o "\.|/" | wc -l) -eq 0 ] && TARGET="$CURRENT_DATABASE"."$TARGET"
+			[ -n "$SOURCE" ] && [ -n "$TARGET" ] && write_mermaid_edge "$SOURCE" "$TARGET"
+		done < $TEMP/targets
+	done < $TEMP/sources
 done < $TEMP/extract_value_from_sql_file.tmp
 
 echo "}" >> $DOT_FILE
-cat $DOT_FILE
 
-dot -T $OUTPUT_FORMAT -O $DOT_FILE -o $OUTPUT_FILE
+case "$OUTPUT_FORMAT" in
+	pdf)
+		cat $DOT_FILE
+		dot -T pdf -O $DOT_FILE -o $PDF_FILE
+		;;
+	dot)
+		cat $DOT_FILE
+		;;
+	mermaid)
+		cat $MERMAID_FILE
+		;;
+esac
 
 }
 
