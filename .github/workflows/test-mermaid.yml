@@ -1,0 +1,49 @@
+name: Test Mermaid Output
+
+on:
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  mermaid:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y graphviz gawk sed
+
+      - name: Generate Mermaid output
+        run: |
+          chmod +x ./sql-to-pdf.sh
+          ./sql-to-pdf.sh target/sql/mermaid-example.sql mermaid > mermaid_stdout.txt
+          test -f target/mermaid/mermaid-example.mmd
+          grep -q "flowchart LR" target/mermaid/mermaid-example.mmd
+          grep -q -- "-->" target/mermaid/mermaid-example.mmd
+
+      - name: Upload Mermaid artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mermaid-diagram
+          path: target/mermaid/mermaid-example.mmd
+
+      - name: Comment on PR with Mermaid diagram
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('target/mermaid/mermaid-example.mmd', 'utf8');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## Mermaid Preview\n\n\`\`\`mermaid\n${body}\n\`\`\``
+            });
