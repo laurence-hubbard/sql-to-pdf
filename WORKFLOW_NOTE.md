@@ -1,0 +1,1 @@
+Workflow scaffold branch for Mermaid tests.
